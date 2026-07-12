@@ -3,5 +3,7 @@ package ru.leti.toposort;
 public enum Mode {
     ADD_VERTEX,
     ADD_EDGE,
-    MOVE
+    MOVE_EDGE,
+    DELETE_VERTEX,
+    DELETE_EDGE
 }
