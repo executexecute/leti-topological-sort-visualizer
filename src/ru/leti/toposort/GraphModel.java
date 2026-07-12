@@ -15,6 +15,9 @@ public class GraphModel {
     }
 
     public Vertex addVertexWithId(int id, int x, int y) {
+        if (id < 0) {
+            throw new IllegalArgumentException("Идентификатор вершины не может быть отрицательным.");
+        }
         if (vertices.containsKey(id)) {
             throw new IllegalArgumentException("Вершина с id " + id + " уже существует.");
         }
@@ -36,6 +39,19 @@ public class GraphModel {
         }
         edges.add(new DirectedEdge(from, to));
         return true;
+    }
+
+    public boolean removeVertex(int id) {
+        Vertex removed = vertices.remove(id);
+        if (removed == null) {
+            return false;
+        }
+        edges.removeIf(edge -> edge.getFrom() == id || edge.getTo() == id);
+        return true;
+    }
+
+    public boolean removeEdge(int from, int to) {
+        return edges.removeIf(edge -> edge.connects(from, to));
     }
 
     public boolean hasEdge(int from, int to) {
@@ -109,11 +125,11 @@ public class GraphModel {
 
     public void loadDemoGraph() {
         clear();
-        addVertexWithId(0, 140, 180);
-        addVertexWithId(1, 380, 120);
-        addVertexWithId(2, 380, 300);
-        addVertexWithId(3, 650, 210);
-        addVertexWithId(4, 890, 210);
+        addVertexWithId(0, 140, 210);
+        addVertexWithId(1, 390, 130);
+        addVertexWithId(2, 390, 310);
+        addVertexWithId(3, 680, 220);
+        addVertexWithId(4, 950, 220);
 
         addEdge(0, 1);
         addEdge(0, 2);

@@ -555,7 +555,7 @@ public class MainFrame extends JFrame {
                 + "<b>Технологии:</b> Java 17, Swing, GitHub<br>"
                 + "<b>Версия:</b> Release 1.0<br><hr>"
                 + "<b>Любимый мем бригады:</b><br>"
-                + "— Программа работает?<br>— Да.<br>— Тогда не трогай.<br>"
+                + "— Можно, а зачем?<br>"
                 + "</div></html>";
         JOptionPane.showMessageDialog(this, html, "О разработчиках", JOptionPane.INFORMATION_MESSAGE);
     }

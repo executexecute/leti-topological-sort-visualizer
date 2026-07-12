@@ -1,6 +1,8 @@
 package ru.leti.toposort;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -10,12 +12,20 @@ public class TopologicalSortResult {
     private final List<Integer> order;
     private final Map<Integer, Integer> initialIndegrees;
     private final String message;
+    private final List<AlgorithmStep> steps;
 
-    public TopologicalSortResult(boolean success, List<Integer> order, Map<Integer, Integer> initialIndegrees, String message) {
+    public TopologicalSortResult(
+            boolean success,
+            List<Integer> order,
+            Map<Integer, Integer> initialIndegrees,
+            String message,
+            List<AlgorithmStep> steps
+    ) {
         this.success = success;
-        this.order = new ArrayList<>(order);
-        this.initialIndegrees = initialIndegrees;
+        this.order = Collections.unmodifiableList(new ArrayList<>(order));
+        this.initialIndegrees = Collections.unmodifiableMap(new LinkedHashMap<>(initialIndegrees));
         this.message = message;
+        this.steps = Collections.unmodifiableList(new ArrayList<>(steps));
     }
 
     public boolean isSuccess() {
@@ -23,7 +33,7 @@ public class TopologicalSortResult {
     }
 
     public List<Integer> getOrder() {
-        return new ArrayList<>(order);
+        return order;
     }
 
     public Map<Integer, Integer> getInitialIndegrees() {
@@ -32,6 +42,10 @@ public class TopologicalSortResult {
 
     public String getMessage() {
         return message;
+    }
+
+    public List<AlgorithmStep> getSteps() {
+        return steps;
     }
 
     public String getOrderAsText() {
