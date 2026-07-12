@@ -1,6 +1,7 @@
 package ru.leti.toposort;
 
 import javax.swing.BorderFactory;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
@@ -8,13 +9,20 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSpinner;
 import javax.swing.JTextArea;
 import javax.swing.JToolBar;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
+import javax.swing.Timer;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.GridLayout;
 import java.io.File;
+import java.util.List;
+import java.util.Map;
+import java.util.StringJoiner;
 
 public class MainFrame extends JFrame {
     private final GraphModel graph = new GraphModel();
@@ -24,25 +32,39 @@ public class MainFrame extends JFrame {
     private final GraphPanel graphPanel;
 
     private TopologicalSortResult lastResult = null;
+    private int currentStepIndex = -1;
+    private final Timer autoTimer;
 
     private final JTextArea explanationArea = new JTextArea();
-    private final JLabel queueLabel = new JLabel("Начальная очередь: —");
-    private final JLabel resultLabel = new JLabel("Результат: —");
-    private final JLabel stepLabel = new JLabel("Версия: альфа");
+    private final JTextArea queueArea = createReadOnlyTextArea();
+    private final JTextArea resultArea = createReadOnlyTextArea();
+    private final JTextArea indegreesArea = createReadOnlyTextArea();
+
+    private final JLabel stepLabel = new JLabel("Шаг: алгоритм не запущен");
+    private final JLabel currentLabel = new JLabel("Текущий элемент: —");
     private final JLabel vertexCountLabel = new JLabel("Вершин: 0");
     private final JLabel edgeCountLabel = new JLabel("Рёбер: 0");
-    private final JLabel statusLabel = new JLabel("Готово. Альфа-версия: загрузка графа и вывод итогового результата.");
+    private final JLabel statusLabel = new JLabel("Готово. Финальная версия приложения.");
+
+    private final JButton runButton = new JButton("Запустить алгоритм");
+    private final JButton previousButton = new JButton("Предыдущий шаг");
+    private final JButton nextButton = new JButton("Следующий шаг");
+    private final JButton autoButton = new JButton("Автозапуск");
+    private final JButton stopButton = new JButton("Стоп");
+    private final JButton saveResultButton = new JButton("Сохранить результат");
+    private final JSpinner intervalSpinner = new JSpinner(new SpinnerNumberModel(1000, 200, 10000, 100));
 
     public MainFrame() {
-        super("Визуализатор топологической сортировки — альфа-версия");
+        super("Визуализатор топологической сортировки — финальная версия");
 
         graph.loadDemoGraph();
-
-        graphPanel = new GraphPanel(graph, this::refreshStatePanel, this::setExplanation);
-        graphPanel.setHighlightedVertex(0);
+        graphPanel = new GraphPanel(graph, this::handleGraphChanged, this::setExplanation);
+        autoTimer = new Timer((Integer) intervalSpinner.getValue(), e -> advanceAutomatically());
+        autoTimer.setInitialDelay((Integer) intervalSpinner.getValue());
 
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setMinimumSize(new Dimension(1050, 680));
+        setMinimumSize(new Dimension(1180, 800));
+        setPreferredSize(new Dimension(1380, 900));
         setLayout(new BorderLayout());
 
         add(createToolbar(), BorderLayout.NORTH);
@@ -51,16 +73,43 @@ public class MainFrame extends JFrame {
         add(createBottomPanel(), BorderLayout.SOUTH);
 
         explanationArea.setText(
-                "Альфа-версия приложения.\n"
-                        + "Можно загрузить ориентированный граф из файла, отобразить его в окне и вывести итоговый результат топологической сортировки."
+                "Финальная версия визуализатора топологической сортировки.\n"
+                        + "Граф можно построить вручную или открыть из файла. Алгоритм Кана выполняется "
+                        + "по шагам вручную либо автоматически с выбранным интервалом. Доступен шаг назад.\n"
+                        + "Текущая вершина и ребро выделяются на графе, а очередь, степени и результат отображаются справа."
         );
         explanationArea.setLineWrap(true);
         explanationArea.setWrapStyleWord(true);
         explanationArea.setEditable(false);
 
-        refreshStatePanel();
+        configureActions();
+        refreshGraphInfo();
+        resetAlgorithmState();
         pack();
         setLocationRelativeTo(null);
+    }
+
+    private static JTextArea createReadOnlyTextArea() {
+        JTextArea area = new JTextArea();
+        area.setEditable(false);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setRows(2);
+        return area;
+    }
+
+    private void configureActions() {
+        runButton.addActionListener(e -> startStepByStepSort());
+        previousButton.addActionListener(e -> showPreviousStep());
+        nextButton.addActionListener(e -> showNextStep());
+        autoButton.addActionListener(e -> startAutoRun());
+        stopButton.addActionListener(e -> stopAutoRun("Автоматическое выполнение остановлено."));
+        saveResultButton.addActionListener(e -> saveResultFile());
+        intervalSpinner.addChangeListener(e -> {
+            int interval = (Integer) intervalSpinner.getValue();
+            autoTimer.setDelay(interval);
+            autoTimer.setInitialDelay(interval);
+        });
     }
 
     private JToolBar createToolbar() {
@@ -69,54 +118,49 @@ public class MainFrame extends JFrame {
 
         JButton addVertexButton = new JButton("Добавить вершину");
         JButton addEdgeButton = new JButton("Добавить ребро");
-        JButton moveButton = new JButton("Переместить");
-        JButton openButton = new JButton("Открыть");
+        JButton moveEdgeButton = new JButton("Переместить ребро");
+        JButton deleteVertexButton = new JButton("Удалить вершину");
+        JButton deleteEdgeButton = new JButton("Удалить ребро");
+        JButton openButton = new JButton("Открыть граф");
         JButton saveButton = new JButton("Сохранить граф");
-        JButton clearButton = new JButton("Очистить");
+        JButton clearButton = new JButton("Очистить граф");
         JButton demoButton = new JButton("Демо-граф");
         JButton aboutButton = new JButton("О разработчиках");
 
         addVertexButton.addActionListener(e -> {
             graphPanel.setMode(Mode.ADD_VERTEX);
-            setExplanation("Режим добавления вершин: щёлкните по рабочей области, чтобы создать вершину.");
+            setExplanation("Режим добавления вершин: щёлкните по рабочей области.");
         });
-
         addEdgeButton.addActionListener(e -> {
             graphPanel.setMode(Mode.ADD_EDGE);
-            setExplanation("Режим добавления рёбер: выберите начальную и конечную вершину.");
+            setExplanation("Режим добавления рёбер: выберите начальную, затем конечную вершину.");
         });
-
-        moveButton.addActionListener(e -> {
-            graphPanel.setMode(Mode.MOVE);
-            setExplanation("Режим перемещения: перетащите вершину мышью.");
+        moveEdgeButton.addActionListener(e -> {
+            graphPanel.setMode(Mode.MOVE_EDGE);
+            setExplanation(
+                    "Режим перемещения ребра: перетащите линию ребра. "
+                            + "Вместе с ребром перемещаются обе его конечные вершины."
+            );
         });
-
+        deleteVertexButton.addActionListener(e -> {
+            graphPanel.setMode(Mode.DELETE_VERTEX);
+            setExplanation("Режим удаления вершины: нажмите на вершину. Все связанные рёбра будут удалены.");
+        });
+        deleteEdgeButton.addActionListener(e -> {
+            graphPanel.setMode(Mode.DELETE_EDGE);
+            setExplanation("Режим удаления ребра: нажмите рядом с линией нужного ребра.");
+        });
         openButton.addActionListener(e -> openGraphFile());
         saveButton.addActionListener(e -> saveGraphFile());
-
-        clearButton.addActionListener(e -> {
-            graph.clear();
-            lastResult = null;
-            graphPanel.setHighlightedVertex(null);
-            refreshStatePanel();
-            graphPanel.repaint();
-            setExplanation("Граф очищен. Можно добавить вершины вручную или загрузить граф из файла.");
-        });
-
-        demoButton.addActionListener(e -> {
-            graph.loadDemoGraph();
-            lastResult = null;
-            graphPanel.setHighlightedVertex(0);
-            refreshStatePanel();
-            graphPanel.repaint();
-            setExplanation("Загружен демонстрационный ациклический граф.");
-        });
-
+        clearButton.addActionListener(e -> clearGraph());
+        demoButton.addActionListener(e -> loadDemoGraph());
         aboutButton.addActionListener(e -> showAboutDialog());
 
         toolbar.add(addVertexButton);
         toolbar.add(addEdgeButton);
-        toolbar.add(moveButton);
+        toolbar.add(moveEdgeButton);
+        toolbar.add(deleteVertexButton);
+        toolbar.add(deleteEdgeButton);
         toolbar.addSeparator();
         toolbar.add(openButton);
         toolbar.add(saveButton);
@@ -124,82 +168,87 @@ public class MainFrame extends JFrame {
         toolbar.add(demoButton);
         toolbar.addSeparator();
         toolbar.add(aboutButton);
-
         return toolbar;
     }
 
     private JScrollPane createGraphArea() {
-        JScrollPane scrollPane = new JScrollPane(graphPanel);
+        JScrollPane scrollPane = new JScrollPane(
+                graphPanel,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+        );
         scrollPane.setBorder(BorderFactory.createTitledBorder("Рабочая область с графом"));
-        scrollPane.setPreferredSize(new Dimension(760, 540));
+        scrollPane.setPreferredSize(new Dimension(820, 560));
         return scrollPane;
     }
 
     private JPanel createRightPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setPreferredSize(new Dimension(310, 540));
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+        panel.setPreferredSize(new Dimension(365, 585));
         panel.setBorder(BorderFactory.createTitledBorder("Управление алгоритмом"));
 
         JPanel buttons = new JPanel(new GridLayout(0, 1, 6, 6));
-
-        JButton runButton = new JButton("Запустить алгоритм");
-        JButton saveResultButton = new JButton("Сохранить результат");
-        JButton previousButton = new JButton("Предыдущий шаг");
-        JButton nextButton = new JButton("Следующий шаг");
-        JButton autoButton = new JButton("Автозапуск");
-        JButton stopButton = new JButton("Стоп");
-
-        runButton.addActionListener(e -> runTopologicalSort());
-        saveResultButton.addActionListener(e -> saveResultFile());
-
-        previousButton.addActionListener(e -> showAlphaMessage("Пошаговый режим и шаг назад будут реализованы в бета-версии."));
-        nextButton.addActionListener(e -> showAlphaMessage("Пошаговый режим будет реализован в бета-версии. В альфа-версии выводится итоговый результат."));
-        autoButton.addActionListener(e -> showAlphaMessage("Автоматическое выполнение шагов будет реализовано в финальной версии."));
-        stopButton.addActionListener(e -> showAlphaMessage("Остановка автозапуска будет доступна после добавления автоматического режима."));
-
         buttons.add(runButton);
-        buttons.add(saveResultButton);
         buttons.add(previousButton);
         buttons.add(nextButton);
         buttons.add(autoButton);
         buttons.add(stopButton);
 
-        JPanel statePanel = new JPanel(new GridLayout(0, 1, 6, 6));
-        statePanel.setBorder(BorderFactory.createTitledBorder("Состояние"));
+        JPanel intervalPanel = new JPanel(new BorderLayout(6, 0));
+        intervalPanel.add(new JLabel("Интервал, мс:"), BorderLayout.WEST);
+        intervalPanel.add(intervalSpinner, BorderLayout.CENTER);
+        buttons.add(intervalPanel);
+        buttons.add(saveResultButton);
+
+        JPanel statePanel = new JPanel();
+        statePanel.setLayout(new BoxLayout(statePanel, BoxLayout.Y_AXIS));
+        statePanel.setBorder(BorderFactory.createTitledBorder("Состояние алгоритма"));
         statePanel.add(stepLabel);
+        statePanel.add(currentLabel);
         statePanel.add(vertexCountLabel);
         statePanel.add(edgeCountLabel);
-        statePanel.add(queueLabel);
-        statePanel.add(resultLabel);
+        statePanel.add(createLabeledScrollPane("Очередь", queueArea, 58));
+        statePanel.add(createLabeledScrollPane("Текущий результат", resultArea, 68));
+        statePanel.add(createLabeledScrollPane("Входящие степени", indegreesArea, 155));
 
         panel.add(buttons, BorderLayout.NORTH);
         panel.add(statePanel, BorderLayout.CENTER);
-
         return panel;
     }
 
+    private JScrollPane createLabeledScrollPane(String title, JTextArea area, int height) {
+        JScrollPane scrollPane = new JScrollPane(
+                area,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+        );
+        scrollPane.setBorder(BorderFactory.createTitledBorder(title));
+        scrollPane.setPreferredSize(new Dimension(335, height));
+        scrollPane.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
+        return scrollPane;
+    }
+
     private JPanel createBottomPanel() {
-
         JPanel bottom = new JPanel(new BorderLayout());
-        bottom.setBorder(BorderFactory.createTitledBorder("Пояснение"));
+        bottom.setBorder(BorderFactory.createTitledBorder("Подробное пояснение текущего шага"));
 
-        JScrollPane explanationScroll = new JScrollPane(explanationArea);
-        explanationScroll.setPreferredSize(new Dimension(900, 125));
-
+        JScrollPane explanationScroll = new JScrollPane(
+                explanationArea,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+        );
+        explanationScroll.setPreferredSize(new Dimension(1050, 195));
         bottom.add(explanationScroll, BorderLayout.CENTER);
-
 
         statusLabel.setHorizontalAlignment(SwingConstants.LEFT);
         statusLabel.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
         bottom.add(statusLabel, BorderLayout.SOUTH);
-
         return bottom;
     }
 
     private void openGraphFile() {
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Открыть файл графа");
-
+        stopAutoRun(null);
+        JFileChooser chooser = createTextFileChooser("Открыть граф");
         int result = chooser.showOpenDialog(this);
         if (result != JFileChooser.APPROVE_OPTION) {
             return;
@@ -209,21 +258,26 @@ public class MainFrame extends JFrame {
         try {
             GraphModel loaded = graphFileService.load(file.toPath());
             graph.replaceWith(loaded);
-            lastResult = null;
-            graphPanel.setHighlightedVertex(null);
-            refreshStatePanel();
+            graphPanel.updateCanvasSize();
+            resetAlgorithmState();
+            refreshGraphInfo();
             graphPanel.repaint();
-            setExplanation("Граф загружен из файла:\n" + file.getName() + "\nТеперь можно запустить топологическую сортировку.");
+            setExplanation(
+                    "Граф успешно загружен из файла «" + file.getName() + "».\n"
+                            + "Вершин: " + graph.getVertexCount() + ", рёбер: " + graph.getEdgeCount() + "."
+            );
+        } catch (IllegalArgumentException exception) {
+            showError("Некорректный файл графа", exception.getMessage());
+        } catch (SecurityException exception) {
+            showError("Ошибка доступа", "Операционная система запретила доступ к файлу.");
         } catch (Exception exception) {
-            showError("Не удалось загрузить граф", exception.getMessage());
+            showError("Не удалось открыть граф", safeMessage(exception));
         }
     }
 
     private void saveGraphFile() {
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Сохранить граф");
+        JFileChooser chooser = createTextFileChooser("Сохранить граф");
         chooser.setSelectedFile(new File("graph.txt"));
-
         int result = chooser.showSaveDialog(this);
         if (result != JFileChooser.APPROVE_OPTION) {
             return;
@@ -231,111 +285,278 @@ public class MainFrame extends JFrame {
 
         try {
             graphFileService.save(graph, chooser.getSelectedFile().toPath());
-            setExplanation("Граф сохранён в файл:\n" + chooser.getSelectedFile().getName());
+            setExplanation("Граф сохранён в файл «" + chooser.getSelectedFile().getName() + "».");
+        } catch (SecurityException exception) {
+            showError("Ошибка доступа", "Нет прав на запись в выбранную папку.");
         } catch (Exception exception) {
-            showError("Не удалось сохранить граф", exception.getMessage());
+            showError("Не удалось сохранить граф", safeMessage(exception));
         }
     }
 
     private void saveResultFile() {
         if (lastResult == null) {
-            showAlphaMessage("Сначала запустите алгоритм, чтобы получить результат.");
+            showInformation("Сначала запустите алгоритм, чтобы получить результат.");
             return;
         }
 
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Сохранить результат");
+        JFileChooser chooser = createTextFileChooser("Сохранить результат");
         chooser.setSelectedFile(new File("topological_sort_result.txt"));
-
-        int dialogResult = chooser.showSaveDialog(this);
-        if (dialogResult != JFileChooser.APPROVE_OPTION) {
+        int result = chooser.showSaveDialog(this);
+        if (result != JFileChooser.APPROVE_OPTION) {
             return;
         }
 
         try {
             resultFileService.save(graph, lastResult, chooser.getSelectedFile().toPath());
-            setExplanation("Результат сохранён в файл:\n" + chooser.getSelectedFile().getName());
+            setExplanation("Результат сохранён в файл «" + chooser.getSelectedFile().getName() + "».");
+        } catch (SecurityException exception) {
+            showError("Ошибка доступа", "Нет прав на запись в выбранную папку.");
         } catch (Exception exception) {
-            showError("Не удалось сохранить результат", exception.getMessage());
+            showError("Не удалось сохранить результат", safeMessage(exception));
         }
     }
 
-    private void runTopologicalSort() {
-        TopologicalSortResult result = sorter.sort(graph);
-        lastResult = result;
+    private JFileChooser createTextFileChooser(String title) {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle(title);
+        chooser.setFileFilter(new FileNameExtensionFilter("Текстовые файлы (*.txt)", "txt"));
+        return chooser;
+    }
 
-        StringBuilder text = new StringBuilder();
-        text.append(result.getMessage()).append("\n\n");
-
-        if (result.isSuccess()) {
-            text.append("Топологический порядок:\n");
-            text.append(result.getOrderAsText()).append("\n\n");
-            text.append("В альфа-версии выводится итоговый результат алгоритма. ");
-            text.append("Пошаговое выполнение будет добавлено в бета-версии.");
-
-            if (!result.getOrder().isEmpty()) {
-                graphPanel.setHighlightedVertex(result.getOrder().get(0));
-            }
-        } else {
-            text.append("Частично построенный порядок:\n");
-            text.append(result.getOrderAsText()).append("\n\n");
-            text.append("Если в результате есть не все вершины, значит в графе остались вершины, входящие в цикл.");
-            graphPanel.setHighlightedVertex(null);
-        }
-
-        resultLabel.setText("Результат: " + result.getOrderAsText());
-        queueLabel.setText("Начальная очередь: " + getInitialQueueText(result));
-        stepLabel.setText("Версия: альфа, результат получен");
-
+    private void clearGraph() {
+        stopAutoRun(null);
+        graph.clear();
+        graphPanel.updateCanvasSize();
+        resetAlgorithmState();
+        refreshGraphInfo();
         graphPanel.repaint();
-        setExplanation(text.toString());
+        setExplanation("Граф очищен. Можно построить новый граф или открыть его из файла.");
     }
 
-    private String getInitialQueueText(TopologicalSortResult result) {
-        StringBuilder queue = new StringBuilder();
-        for (var entry : result.getInitialIndegrees().entrySet()) {
-            if (entry.getValue() == 0) {
-                if (queue.length() > 0) {
-                    queue.append(", ");
-                }
-                queue.append(entry.getKey());
-            }
+    private void loadDemoGraph() {
+        stopAutoRun(null);
+        graph.loadDemoGraph();
+        graphPanel.updateCanvasSize();
+        resetAlgorithmState();
+        refreshGraphInfo();
+        graphPanel.repaint();
+        setExplanation("Загружен демонстрационный ориентированный ациклический граф.");
+    }
+
+    private void startStepByStepSort() {
+        stopAutoRun(null);
+        try {
+            lastResult = sorter.sort(graph);
+            currentStepIndex = 0;
+            displayCurrentStep();
+        } catch (RuntimeException exception) {
+            resetAlgorithmState();
+            showError("Ошибка алгоритма", safeMessage(exception));
         }
-        return queue.length() == 0 ? "—" : queue.toString();
     }
 
-    private void refreshStatePanel() {
+    private void showNextStep() {
+        if (lastResult == null) {
+            startStepByStepSort();
+            return;
+        }
+        if (currentStepIndex < lastResult.getSteps().size() - 1) {
+            currentStepIndex++;
+            displayCurrentStep();
+        }
+    }
+
+    private void showPreviousStep() {
+        stopAutoRun(null);
+        if (lastResult != null && currentStepIndex > 0) {
+            currentStepIndex--;
+            displayCurrentStep();
+        }
+    }
+
+    private void startAutoRun() {
+        if (graph.getVertexCount() == 0) {
+            startStepByStepSort();
+            return;
+        }
+        if (lastResult == null || currentStepIndex >= lastResult.getSteps().size() - 1) {
+            lastResult = sorter.sort(graph);
+            currentStepIndex = 0;
+            displayCurrentStep();
+        }
+        int interval = (Integer) intervalSpinner.getValue();
+        autoTimer.setDelay(interval);
+        autoTimer.setInitialDelay(interval);
+        autoTimer.start();
+        setStatus("Автоматическое выполнение запущено. Интервал: " + interval + " мс.");
+        updateControls();
+    }
+
+    private void advanceAutomatically() {
+        if (lastResult == null || currentStepIndex >= lastResult.getSteps().size() - 1) {
+            stopAutoRun("Автоматическое выполнение завершено.");
+            return;
+        }
+        currentStepIndex++;
+        displayCurrentStep();
+        if (currentStepIndex >= lastResult.getSteps().size() - 1) {
+            stopAutoRun("Автоматическое выполнение завершено.");
+        }
+    }
+
+    private void stopAutoRun(String message) {
+        if (autoTimer != null && autoTimer.isRunning()) {
+            autoTimer.stop();
+        }
+        if (message != null) {
+            setStatus(message);
+        }
+        updateControls();
+    }
+
+    private void displayCurrentStep() {
+        if (lastResult == null || lastResult.getSteps().isEmpty() || currentStepIndex < 0) {
+            return;
+        }
+        AlgorithmStep step = lastResult.getSteps().get(currentStepIndex);
+        graphPanel.setAlgorithmState(step);
+
+        stepLabel.setText("Шаг: " + (currentStepIndex + 1) + " из " + lastResult.getSteps().size());
+        if (step.getCurrentEdge() != null) {
+            currentLabel.setText(
+                    "Текущее ребро: " + step.getCurrentEdge().getFrom() + " -> " + step.getCurrentEdge().getTo()
+            );
+        } else if (step.getCurrentVertex() != null) {
+            currentLabel.setText("Текущая вершина: " + step.getCurrentVertex());
+        } else {
+            currentLabel.setText("Текущий элемент: —");
+        }
+
+        queueArea.setText(formatList(step.getQueue()));
+        resultArea.setText(formatOrder(step.getResult()));
+        indegreesArea.setText(formatIndegrees(step.getIndegrees()));
+        explanationArea.setText(step.getDescription());
+        explanationArea.setCaretPosition(0);
+
+        if (step.isFinished()) {
+            setStatus(step.isSuccess() ? "Алгоритм завершён успешно." : "Алгоритм завершён: обнаружен цикл или граф пуст.");
+        } else {
+            setStatus("Отображён шаг " + (currentStepIndex + 1) + ".");
+        }
+        updateControls();
+    }
+
+    private String formatList(List<Integer> values) {
+        return values.isEmpty() ? "[]" : values.toString();
+    }
+
+    private String formatOrder(List<Integer> values) {
+        if (values.isEmpty()) {
+            return "—";
+        }
+        StringJoiner joiner = new StringJoiner(" -> ");
+        for (Integer value : values) {
+            joiner.add(String.valueOf(value));
+        }
+        return joiner.toString();
+    }
+
+    private String formatIndegrees(Map<Integer, Integer> indegrees) {
+        if (indegrees.isEmpty()) {
+            return "—";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (Map.Entry<Integer, Integer> entry : indegrees.entrySet()) {
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(entry.getKey()).append(": ").append(entry.getValue());
+        }
+        return builder.toString();
+    }
+
+    private void handleGraphChanged() {
+        resetAlgorithmState();
+        refreshGraphInfo();
+    }
+
+    private void resetAlgorithmState() {
+        if (autoTimer != null) {
+            autoTimer.stop();
+        }
+        lastResult = null;
+        currentStepIndex = -1;
+        graphPanel.clearAlgorithmState();
+        stepLabel.setText("Шаг: алгоритм не запущен");
+        currentLabel.setText("Текущий элемент: —");
+        queueArea.setText("—");
+        resultArea.setText("—");
+        indegreesArea.setText("—");
+        updateControls();
+    }
+
+    private void refreshGraphInfo() {
         vertexCountLabel.setText("Вершин: " + graph.getVertexCount());
         edgeCountLabel.setText("Рёбер: " + graph.getEdgeCount());
-        resultLabel.setText("Результат: " + (lastResult == null ? "—" : lastResult.getOrderAsText()));
-        queueLabel.setText("Начальная очередь: —");
-        statusLabel.setText("Вершин: " + graph.getVertexCount() + ", рёбер: " + graph.getEdgeCount() + ".");
+    }
+
+    private void updateControls() {
+        boolean hasResult = lastResult != null && !lastResult.getSteps().isEmpty();
+        boolean autoRunning = autoTimer != null && autoTimer.isRunning();
+        boolean hasPrevious = hasResult && currentStepIndex > 0;
+        boolean hasNext = hasResult && currentStepIndex < lastResult.getSteps().size() - 1;
+
+        runButton.setEnabled(!autoRunning);
+        previousButton.setEnabled(!autoRunning && hasPrevious);
+        nextButton.setEnabled(!autoRunning && hasNext);
+        autoButton.setEnabled(!autoRunning && graph.getVertexCount() > 0);
+        stopButton.setEnabled(autoRunning);
+        saveResultButton.setEnabled(hasResult);
+        intervalSpinner.setEnabled(!autoRunning);
     }
 
     private void setExplanation(String text) {
         explanationArea.setText(text);
-        //statusLabel.setText(text.replace('\n', ' '));
+        explanationArea.setCaretPosition(0);
+        setStatus(text.replace('\n', ' '));
     }
 
-    private void showAlphaMessage(String message) {
+    private void setStatus(String text) {
+        statusLabel.setText(text);
+        statusLabel.setToolTipText(text);
+    }
+
+    private void showInformation(String message) {
+        JOptionPane.showMessageDialog(this, message, "Информация", JOptionPane.INFORMATION_MESSAGE);
         setExplanation(message);
-        JOptionPane.showMessageDialog(this, message, "Альфа-версия", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void showError(String title, String message) {
-        setExplanation(title + ":\n" + message);
-        JOptionPane.showMessageDialog(this, message, title, JOptionPane.ERROR_MESSAGE);
+        String safe = message == null || message.isBlank() ? "Неизвестная ошибка." : message;
+        JOptionPane.showMessageDialog(this, safe, title, JOptionPane.ERROR_MESSAGE);
+        explanationArea.setText(title + ":\n" + safe);
+        explanationArea.setCaretPosition(0);
+        setStatus(title + ": " + safe);
+    }
+
+    private String safeMessage(Exception exception) {
+        return exception.getMessage() == null || exception.getMessage().isBlank()
+                ? exception.getClass().getSimpleName()
+                : exception.getMessage();
     }
 
     private void showAboutDialog() {
-        JOptionPane.showMessageDialog(
-                this,
-                "Визуализатор топологической сортировки\n\n"
-                        + "Баневич Дмитрий, 4382\n"
-                        + "Боков Максим, 4382\n"
-                        + "Овчаренко Ярослав, 4383",
-                "О разработчиках",
-                JOptionPane.INFORMATION_MESSAGE
-        );
+        String html = "<html><div style='width:390px'>"
+                + "<h2>Визуализатор топологической сортировки</h2>"
+                + "<b>Разработчики:</b><br>"
+                + "Баневич Дмитрий, группа 4382<br>"
+                + "Боков Максим, группа 4382<br>"
+                + "Овчаренко Ярослав, группа 4383<br><br>"
+                + "<b>Технологии:</b> Java 17, Swing, GitHub<br>"
+                + "<b>Версия:</b> Release 1.0<br><hr>"
+                + "<b>Любимый мем бригады:</b><br>"
+                + "— Программа работает?<br>— Да.<br>— Тогда не трогай.<br>"
+                + "</div></html>";
+        JOptionPane.showMessageDialog(this, html, "О разработчиках", JOptionPane.INFORMATION_MESSAGE);
     }
 }
