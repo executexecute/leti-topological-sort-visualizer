@@ -28,7 +28,7 @@ public class GraphPanel extends JPanel {
 
     private Mode mode = Mode.ADD_VERTEX;
     private Integer selectedEdgeStart = null;
-    private DirectedEdge draggedEdge = null;
+    private Vertex draggedVertex = null;
     private Point previousDragPoint = null;
 
     private Integer highlightedVertex = null;
@@ -57,7 +57,7 @@ public class GraphPanel extends JPanel {
 
             @Override
             public void mouseReleased(MouseEvent event) {
-                draggedEdge = null;
+                draggedVertex = null;
                 previousDragPoint = null;
             }
         };
@@ -69,7 +69,7 @@ public class GraphPanel extends JPanel {
     public void setMode(Mode mode) {
         this.mode = mode;
         selectedEdgeStart = null;
-        draggedEdge = null;
+        draggedVertex = null;
         previousDragPoint = null;
         repaint();
     }
@@ -111,7 +111,7 @@ public class GraphPanel extends JPanel {
         switch (mode) {
             case ADD_VERTEX -> addVertex(event);
             case ADD_EDGE -> addEdge(event);
-            case MOVE_EDGE -> beginMoveEdge(event);
+            case MOVE_VERTEX -> beginMoveVertex(event);
             case DELETE_VERTEX -> deleteVertex(event);
             case DELETE_EDGE -> deleteEdge(event);
         }
@@ -151,13 +151,13 @@ public class GraphPanel extends JPanel {
         }
     }
 
-    private void beginMoveEdge(MouseEvent event) {
-        draggedEdge = findEdge(event.getX(), event.getY());
-        previousDragPoint = draggedEdge == null ? null : event.getPoint();
-        if (draggedEdge == null) {
-            messageConsumer.accept("Ребро не выбрано. Нажмите ближе к линии ребра.");
+    private void beginMoveVertex(MouseEvent event) {
+        draggedVertex = findVertex(event.getX(), event.getY());
+        previousDragPoint = draggedVertex == null ? null : event.getPoint();
+        if (draggedVertex == null) {
+            messageConsumer.accept("Вершина не выбрана. Нажмите по кругу вершины.");
         } else {
-            messageConsumer.accept("Перемещается ребро " + draggedEdge.getFrom() + " -> " + draggedEdge.getTo() + ".");
+            messageConsumer.accept("Перемещается вершина " + draggedVertex.getId() + ".");
         }
         repaint();
     }
@@ -186,20 +186,16 @@ public class GraphPanel extends JPanel {
     }
 
     private void handleMouseDragged(MouseEvent event) {
-        if (mode != Mode.MOVE_EDGE || draggedEdge == null || previousDragPoint == null) {
+        if (mode != Mode.MOVE_VERTEX || draggedVertex == null || previousDragPoint == null) {
             return;
         }
 
         int dx = event.getX() - previousDragPoint.x;
         int dy = event.getY() - previousDragPoint.y;
-        Vertex from = graph.getVertex(draggedEdge.getFrom());
-        Vertex to = graph.getVertex(draggedEdge.getTo());
-        if (from == null || to == null) {
-            return;
-        }
-
-        from.setPosition(Math.max(RADIUS, from.getX() + dx), Math.max(RADIUS, from.getY() + dy));
-        to.setPosition(Math.max(RADIUS, to.getX() + dx), Math.max(RADIUS, to.getY() + dy));
+        draggedVertex.setPosition(
+                Math.max(RADIUS, draggedVertex.getX() + dx),
+                Math.max(RADIUS, draggedVertex.getY() + dy)
+        );
         previousDragPoint = event.getPoint();
         updateCanvasSize();
         onGraphChanged.run();
@@ -310,14 +306,9 @@ public class GraphPanel extends JPanel {
         int endY = (int) Math.round(to.getY() - unitY * RADIUS);
 
         boolean highlighted = highlightedEdge != null && highlightedEdge.connects(edge.getFrom(), edge.getTo());
-        boolean beingMoved = draggedEdge != null && draggedEdge.connects(edge.getFrom(), edge.getTo());
-
         if (highlighted) {
             g.setStroke(new BasicStroke(5f));
             g.setColor(new Color(220, 80, 30));
-        } else if (beingMoved) {
-            g.setStroke(new BasicStroke(4f));
-            g.setColor(new Color(45, 110, 200));
         } else {
             g.setStroke(new BasicStroke(2f));
             g.setColor(new Color(70, 70, 70));
@@ -352,6 +343,7 @@ public class GraphPanel extends JPanel {
         boolean processed = processedVertices.contains(vertex.getId());
         boolean queued = queuedVertices.contains(vertex.getId());
         boolean selected = selectedEdgeStart != null && selectedEdgeStart == vertex.getId();
+        boolean beingMoved = draggedVertex != null && draggedVertex.getId() == vertex.getId();
 
         if (current) {
             g.setColor(new Color(255, 220, 150));
@@ -359,6 +351,8 @@ public class GraphPanel extends JPanel {
             g.setColor(new Color(205, 240, 210));
         } else if (queued) {
             g.setColor(new Color(205, 225, 255));
+        } else if (beingMoved) {
+            g.setColor(new Color(220, 235, 255));
         } else if (selected) {
             g.setColor(new Color(200, 225, 255));
         } else {
@@ -366,13 +360,15 @@ public class GraphPanel extends JPanel {
         }
         g.fillOval(x - RADIUS, y - RADIUS, RADIUS * 2, RADIUS * 2);
 
-        g.setStroke(new BasicStroke(current || selected ? 4f : 2f));
+        g.setStroke(new BasicStroke(current || selected || beingMoved ? 4f : 2f));
         if (current) {
             g.setColor(new Color(220, 120, 0));
         } else if (processed) {
             g.setColor(new Color(45, 135, 65));
         } else if (queued) {
             g.setColor(new Color(55, 105, 190));
+        } else if (beingMoved) {
+            g.setColor(new Color(45, 110, 200));
         } else {
             g.setColor(new Color(40, 40, 40));
         }
