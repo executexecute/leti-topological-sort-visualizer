@@ -118,7 +118,7 @@ public class MainFrame extends JFrame {
 
         JButton addVertexButton = new JButton("Добавить вершину");
         JButton addEdgeButton = new JButton("Добавить ребро");
-        JButton moveEdgeButton = new JButton("Переместить ребро");
+        JButton moveVertexButton = new JButton("Переместить вершину");
         JButton deleteVertexButton = new JButton("Удалить вершину");
         JButton deleteEdgeButton = new JButton("Удалить ребро");
         JButton openButton = new JButton("Открыть граф");
@@ -135,11 +135,10 @@ public class MainFrame extends JFrame {
             graphPanel.setMode(Mode.ADD_EDGE);
             setExplanation("Режим добавления рёбер: выберите начальную, затем конечную вершину.");
         });
-        moveEdgeButton.addActionListener(e -> {
-            graphPanel.setMode(Mode.MOVE_EDGE);
+        moveVertexButton.addActionListener(e -> {
+            graphPanel.setMode(Mode.MOVE_VERTEX);
             setExplanation(
-                    "Режим перемещения ребра: перетащите линию ребра. "
-                            + "Вместе с ребром перемещаются обе его конечные вершины."
+                    "Режим перемещения вершины: нажмите на вершину и перетащите её в новое место."
             );
         });
         deleteVertexButton.addActionListener(e -> {
@@ -158,7 +157,7 @@ public class MainFrame extends JFrame {
 
         toolbar.add(addVertexButton);
         toolbar.add(addEdgeButton);
-        toolbar.add(moveEdgeButton);
+        toolbar.add(moveVertexButton);
         toolbar.add(deleteVertexButton);
         toolbar.add(deleteEdgeButton);
         toolbar.addSeparator();
